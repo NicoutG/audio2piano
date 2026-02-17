@@ -119,7 +119,7 @@ Audio2Piano is designed to:
 ---
 
 ## Performance
-Audio2Piano has been evaluated on audio files generated with random instruments. These results are **illustrative** and may not fully represent performance on real-world recordings.
+Audio2Piano has been evaluated on audio files generated with random instruments. These results are **illustrative** and may not fully represent performance on real-world recordings. **The metrics below correspond to the raw model predictions, before any postprocessing is applied.**
 
 The metrics below correspond to a **note activation threshold of 0.6**.
 
