@@ -250,7 +250,6 @@ def note_matrices_to_notes(
             onset_val = onset_matrix[t, p]
             sustain_val = sustain_matrix[t, p]
 
-            # -------- ONSET --------
             if onset_val >= onset_threshold:
 
                 if p in last_onset_time:
@@ -273,7 +272,6 @@ def note_matrices_to_notes(
                 }
                 continue
 
-            # -------- NOTE ACTIVE --------
             if p in active_notes:
 
                 start_time = active_notes[p]["start_time"]
@@ -282,7 +280,6 @@ def note_matrices_to_notes(
                 duration_ratio = min(duration / max_duration, 2.0)
                 dynamic_decay = decay_base * (1 + decay_growth * duration_ratio)
 
-                # update power
                 new_power = (
                     active_notes[p]["power"]
                     - dynamic_decay
@@ -291,7 +288,6 @@ def note_matrices_to_notes(
 
                 active_notes[p]["power"] = min(1.0, new_power)
 
-                # fin si puissance <= 0 ou durée max dépassée
                 if active_notes[p]["power"] <= 0 or duration >= max_duration:
                     notes.append({
                         "pitch": p + 21,
@@ -300,7 +296,6 @@ def note_matrices_to_notes(
                     })
                     del active_notes[p]
 
-    # finir notes restantes
     final_time = T * hop_sec
     for p, note in active_notes.items():
         notes.append({
