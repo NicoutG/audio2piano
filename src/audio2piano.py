@@ -122,7 +122,8 @@ class Audio2Piano(nn.Module):
         hop_sec=HOP_SEC,
         n_mels=NB_BINS,
         fmin=30.0,
-        fmax=10000
+        fmax=8000,
+        alpha=0.8
     ):
         if fmax is None:
             fmax = sr / 2
@@ -140,11 +141,15 @@ class Audio2Piano(nn.Module):
         )
 
         mel_db = librosa.power_to_db(mel, ref=np.max)
-
         mel_db = (mel_db - mel_db.mean(axis=1, keepdims=True)) / \
                 (mel_db.std(axis=1, keepdims=True) + 1e-6)
+        
+        mel_db2 = np.power(mel, 0.3)
+        mel_db2 = (mel_db2 - mel_db2.mean()) / (mel_db2.std() + 1e-6)
 
-        return torch.tensor(mel_db, dtype=torch.float32)
+        mel_mix = alpha * mel_db + (1 - alpha) * mel_db2
+
+        return torch.tensor(mel_mix, dtype=torch.float32)
     
     @torch.no_grad()
     def predict_midi(
