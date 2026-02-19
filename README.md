@@ -62,6 +62,16 @@ audio2piano_demo.ipynb
 data/musics/midi(output)/
 ```
 
+4. You can also visualize the generated MIDI files using the `midi_visualizer.py` script. Simply run:
+
+```
+python midi_visualizer.py
+```
+
+Then select a MIDI file from the `data/musics/midi(output)/` folder. The piano roll window will display the notes over time:
+
+![Piano Roll Example](data/images/midi_visualizer.jpg)
+
 ### Minimal Usage — Using Only the Transcriber
 
 If you only need the transcription engine, you only need:

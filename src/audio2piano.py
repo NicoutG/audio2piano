@@ -158,7 +158,7 @@ class Audio2Piano(nn.Module):
         sr=SR,
         threshold=THRESHOLD,
         hop_sec=HOP_SEC,
-        decay_base=0.4,
+        decay_base=0.5,
         decay_growth=2.0,
         max_duration=10.0,
         min_onset_interval=0.2,
