@@ -135,9 +135,9 @@ The metrics below correspond to a **note activation threshold of 0.6**.
 
 | Metric        | Onset | Sustain |
 |---------------|-------|---------|
-| Precision     | 0.49  | 0.38    |
-| Recall        | 0.32  | 0.56    |
-| F1-score      | 0.39  | 0.45    |
+| Precision     | 0.46  | 0.37    |
+| Recall        | 0.27  | 0.54    |
+| F1-score      | 0.34  | 0.44    |
 
 ![Performance Graph](data/images/performances.jpg)
 *Figure 1: Precision, Recall, and F1-score on test audio samples.*
