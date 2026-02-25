@@ -14,7 +14,7 @@ THRESHOLD = 0.6
 class Audio2Piano(nn.Module):
     def __init__(
         self,
-        weights_path="weights/model_weights.pth",
+        weights_path="weights/audio2piano_weights.pth",
         device=None,
         n_bins=NB_BINS,
         cnn_hidden=192,

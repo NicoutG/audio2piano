@@ -54,12 +54,14 @@ data/musics/wav(input)/
 
 ```
 audio2piano_demo.ipynb
+audio2pianoMusicPrior.ipynb
 ```
 
 3. The generated MIDI files will be saved in:
 
 ```
 data/musics/midi(output)/
+data/musics/midi(output MusicPrior)/
 ```
 
 4. You can also visualize the generated MIDI files using the `midi_visualizer.py` script. Simply run:
@@ -68,7 +70,7 @@ data/musics/midi(output)/
 python midi_visualizer.py
 ```
 
-Then select a MIDI file from the `data/musics/midi(output)/` folder. The piano roll window will display the notes over time:
+Then select a MIDI file from the `data/musics/midi(output)/` or `data/musics/midi(output MusicPrior)/` folder. The piano roll window will display the notes over time:
 
 ![Piano Roll Example](data/images/midi_visualizer.jpg)
 
@@ -77,7 +79,15 @@ Then select a MIDI file from the `data/musics/midi(output)/` folder. The piano r
 If you only need the transcription engine, you only need:
 
 - `src/audio2piano.py`
-- `weights/model_weights.pth`
+- `weights/audio2piano_weights.pth`
+
+If you want to use the transcription engine with music prior, you only need:
+
+- `src/audio2pianoMusicPrior.py`
+- `src/audio2piano.py`
+- `src/musicPredictor.py`
+- `weights/audio2piano_weights.pth`
+- `weights/musicPredictor_weights.pth`
 
 #### Minimal Required Dependencies
 
@@ -100,12 +110,13 @@ pip install torch librosa numpy mido
 #### Example Usage
 
 ```python
-from audio2piano import transcribe
+from audio2piano import Audio2Piano
 
-transcribe(
+transcriber = Audio2Piano("weights/audio2piano_weights.pth")
+
+transcriber.wav_to_midi_file(
     input_path="data/musics/wav/your_file.wav",
     output_path="data/musics/midi/your_file.mid",
-    weights_path="weights/model_weights.pth"
 )
 ```
 
@@ -183,6 +194,47 @@ Audio2Piano relies on a lightweight neural network to map audio input to piano k
 
 ![Final Output Diagram](data/images/output_final.jpg)  
 *Figure 7: Final MIDI reconstruction.*
+
+4. **Sequential Musical Prior (Optional Improvement)**  
+   The transcription model itself does not rely on any explicit music theory.  
+   It is trained purely as an audio-to-note mapping network and makes frame-wise predictions independently.
+
+   To improve musical coherence, an additional sequential prediction model can be applied.  
+   This model learns musical structure directly from data and predicts **1 second of music from the previous 5 seconds** of context.
+
+   The goal of this prior model is not to impose strict music theory rules, but to capture statistical regularities such as:
+
+   - Harmonic consistency  
+   - Note co-occurrence patterns  
+   - Short-term temporal structure  
+
+   During inference:
+
+   - The transcription model produces onset and sustain probabilities.
+   - A 5-second binary note context is built from these predictions.
+   - The prior model predicts the next 1 second of onset and sustain probabilities.
+   - A confidence-based fusion combines both predictions.
+
+   ![Prédiction Diagram](data/images/prediction.jpg)  
+    *Figure 8: Final MIDI reconstruction.*
+
+   The fusion behaves as follows:
+
+   - When the transcription model is confident, its prediction dominates.
+   - When it is uncertain, the prior assists and stabilizes the output.
+
+   The fusion weight is controlled by `alpha_audio`:
+
+   - `alpha_audio = 1.0` → identical behavior to the original transcription-only model  
+   - `alpha_audio < 1.0` → activates prior-assisted refinement  
+
+   The sequential prior model implementation can be found in:
+
+   ```
+   src/audio2pianoMusicPrior.py
+   ```
+
+   This component is designed as a lightweight structural assistant rather than a music generator.
 
 ---
 
