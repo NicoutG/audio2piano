@@ -11,13 +11,14 @@ from tkinter.filedialog import askopenfilename
 from matplotlib.patches import Rectangle
 import scipy.io.wavfile
 import os
+import matplotlib.cm as cm
 
 # =========================
 # PARAMETERS
 # =========================
 NOTE_MIN = 21
 NOTE_MAX = 108
-N_NOTES = 88
+N_NOTES = NOTE_MAX - NOTE_MIN + 1
 
 FPS = 60
 WINDOW_SECONDS = 5.0
@@ -27,10 +28,18 @@ PLAY_SOUND = True
 SR = 22050
 window_frames = int(WINDOW_SECONDS * FPS)
 
+WHITE_KEY_PIXEL_WIDTH = 5
+BLACK_KEY_PIXEL_WIDTH = 3
+
+GRID_COLOR = (40, 40, 40)
+GRID_THICKNESS = 1
+
 # =========================
 # GLOBALS
 # =========================
-roll = np.zeros((window_frames, N_NOTES), dtype=np.float32)
+roll = None
+full_img = None
+
 T = window_frames
 TOTAL_TIME = WINDOW_SECONDS
 
@@ -78,9 +87,9 @@ def midi_to_wav_array(mid, sr=SR):
     current_time = 0.0
     for msg in mid:
         current_time += msg.time
-        if msg.type=='note_on' and msg.velocity>0:
+        if msg.type=='note_on' and getattr(msg,'velocity',0)>0:
             active_notes[msg.note] = current_time
-        elif msg.type in ('note_off',) or (msg.type=='note_on' and msg.velocity==0):
+        elif msg.type in ('note_off',) or (msg.type=='note_on' and getattr(msg,'velocity',0)==0):
             if msg.note in active_notes:
                 start = active_notes.pop(msg.note)
                 events.append((start,msg.note,current_time-start))
@@ -118,18 +127,16 @@ root.withdraw()
 fig = plt.figure(figsize=(12,8))
 
 manager = plt.get_current_fig_manager()
-manager.window.wm_geometry("+{}+{}".format(
-    int(manager.window.winfo_screenwidth()/2 - 600),
-    int(manager.window.winfo_screenheight()/2 - 400)
-))
+try:
+    manager.window.wm_geometry("+{}+{}".format(
+        int(manager.window.winfo_screenwidth()/2 - 600),
+        int(manager.window.winfo_screenheight()/2 - 400)
+    ))
+except Exception:
+    pass
 
 ax_keys = plt.axes([0.05, 0.10, 0.90, 0.10])
 ax_roll = plt.axes([0.05, 0.20, 0.90, 0.75])
-
-img = ax_roll.imshow(roll, aspect="auto", origin="lower", cmap="inferno", vmin=0, vmax=1)
-ax_roll.set_title("Piano Roll MIDI")
-ax_roll.set_xticks([])
-ax_roll.set_xlabel("")
 
 # =========================
 # KEYBOARD
@@ -167,30 +174,92 @@ def build_keyboard():
 
 build_keyboard()
 
+col_widths = []
+for midi_note in range(NOTE_MIN, NOTE_MAX+1):
+    if (midi_note % 12) in WHITE_PATTERN:
+        col_widths.append(WHITE_KEY_PIXEL_WIDTH)
+    else:
+        col_widths.append(BLACK_KEY_PIXEL_WIDTH)
+total_pixel_width = sum(col_widths)
+
+placeholder = np.zeros((window_frames, total_pixel_width, 3), dtype=np.uint8)
+img = ax_roll.imshow(placeholder, aspect="auto", origin="lower", interpolation='nearest')
+ax_roll.set_title("Piano Roll MIDI")
+ax_roll.set_xticks([])
+ax_roll.set_xlabel("")
+
+# =========================
+# PRE-RENDERING HELPERS
+# =========================
+cmap = cm.get_cmap('inferno')
+
+def overlay_note_grid(img_rgb, widths, color=GRID_COLOR, thickness=GRID_THICKNESS, alpha=0.45):
+    out = img_rgb.astype(np.float32)
+    h, w, _ = out.shape
+    x = 0
+    color_arr = np.array(color, dtype=np.float32)
+    for col_w in widths:
+        for t in range(thickness):
+            xi = x + t
+            if xi >= w:
+                continue
+            out[:, xi, :] = out[:, xi, :] * (1.0 - alpha) + color_arr * alpha
+        x += col_w
+    for t in range(thickness):
+        xi = w - 1 - t
+        if xi >= 0:
+            out[:, xi, :] = out[:, xi, :] * (1.0 - alpha) + color_arr * alpha
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+def render_full_image_from_roll(roll_matrix, widths):
+    arr = np.clip(roll_matrix, 0.0, 1.0)
+    rgba = cmap(arr)
+    rgb = (rgba[..., :3] * 255).astype(np.uint8)
+    T_local, N_local = rgb.shape[0], rgb.shape[1]
+    total_w = sum(widths)
+    out = np.zeros((T_local, total_w, 3), dtype=np.uint8)
+    x = 0
+    for i in range(N_local):
+        w = widths[i]
+        out[:, x:x+w, :] = np.repeat(rgb[:, i:i+1, :], w, axis=1)
+        x += w
+    out = overlay_note_grid(out, widths, color=GRID_COLOR, thickness=GRID_THICKNESS, alpha=0.35)
+    return out
+
 # =========================
 # UPDATE DISPLAY
 # =========================
 def update_keyboard():
+    """
+    Use roll values (float 0..1) to color keys so repeated notes and stages are visible.
+    """
+    global roll
     if roll is None:
         return
     t_frame = int(current_play_time*FPS)
-    if t_frame>=T:
+    if t_frame >= T:
         t_frame = T-1
     active = roll[t_frame]
     for midi_note,rect in white_keys:
-        val = active[midi_note-NOTE_MIN]
-        rect.set_facecolor((1.0,1.0-0.5*val,1.0-val))
+        val = float(active[midi_note-NOTE_MIN])
+        rect.set_facecolor((1.0, 1.0-0.5*val, 1.0-val))
     for midi_note,rect in black_keys:
-        val = active[midi_note-NOTE_MIN]
-        rect.set_facecolor((val,0.0,0.0))
+        val = float(active[midi_note-NOTE_MIN])
+        rect.set_facecolor((val, 0.0, 0.0))
 
 def update_display():
-    if roll is None or img is None:
+    global full_img, scroll_pos
+    if full_img is None:
         return
     sp = int(scroll_pos)
-    sp = max(0,min(sp,T-window_frames))
-    img.set_data(roll[sp:sp+window_frames])
-    ys = np.linspace(0,window_frames-1,6,dtype=int)
+    sp = max(0, min(sp, T - window_frames))
+    slice_img = full_img[sp:sp+window_frames]
+    if slice_img.shape[0] < window_frames:
+        pad_rows = window_frames - slice_img.shape[0]
+        pad = np.zeros((pad_rows, total_pixel_width, 3), dtype=np.uint8)
+        slice_img = np.vstack([slice_img, pad])
+    img.set_data(slice_img)
+    ys = np.linspace(0, window_frames-1, 6, dtype=int)
     ax_roll.set_yticks(ys)
     ax_roll.set_yticklabels([f"{(sp+y)/FPS:.2f}" for y in ys])
     update_keyboard()
@@ -201,20 +270,27 @@ def update_display():
 # =========================
 def on_scroll(event):
     global scroll_pos
-    scroll_pos += SCROLL_SPEED*FPS * (-1 if event.button=="up" else 1)
+    direction = -1 if getattr(event, "button", "up") == "up" else 1
+    scroll_pos += SCROLL_SPEED * FPS * direction
+    scroll_pos = max(0, min(scroll_pos, max(0, T - window_frames)))
     update_display()
 
 def on_mouse(event):
     global current_play_time, play_start_time, scroll_pos
     if event.inaxes != ax_roll or event.ydata is None:
         return
-    t = (scroll_pos + int(event.ydata))/FPS
-    if event.button==1:
-        current_play_time = max(0.0,min(t,TOTAL_TIME))
-        scroll_pos = current_play_time*FPS - window_frames//2
+    t = (scroll_pos + int(event.ydata)) / FPS
+    if event.button == 1:
+        current_play_time = max(0.0, min(t, TOTAL_TIME))
+        scroll_pos = current_play_time * FPS - window_frames // 2
+        scroll_pos = max(0, min(scroll_pos, max(0, T - window_frames)))
         if play_flag and PLAY_SOUND and wav_file:
-            play_start_time = time.time()-current_play_time
-            pygame.mixer.music.play(start=current_play_time)
+            play_start_time = time.time() - current_play_time
+            try:
+                pygame.mixer.music.play(start=current_play_time)
+            except Exception:
+                pygame.mixer.music.stop()
+                pygame.mixer.music.play()
         update_display()
 
 fig.canvas.mpl_connect("scroll_event", on_scroll)
@@ -227,12 +303,15 @@ def play_pause(event):
     global play_flag, play_start_time, current_play_time
     if not play_flag:
         play_flag = True
-        play_start_time = time.time()-current_play_time
+        play_start_time = time.time() - current_play_time
         if PLAY_SOUND and wav_file:
-            pygame.mixer.music.play(start=current_play_time)
+            try:
+                pygame.mixer.music.play(start=current_play_time)
+            except Exception:
+                pygame.mixer.music.play()
     else:
         play_flag = False
-        current_play_time = time.time()-play_start_time
+        current_play_time = time.time() - play_start_time
         if PLAY_SOUND and wav_file:
             pygame.mixer.music.pause()
 
@@ -241,50 +320,57 @@ def play_pause(event):
 # =========================
 def reset(event=None):
     global play_flag, current_play_time, play_start_time, scroll_pos
-    play_flag=False
-    current_play_time=0.0
-    play_start_time=None
-    scroll_pos=0.0
+    play_flag = False
+    current_play_time = 0.0
+    play_start_time = None
+    scroll_pos = 0.0
     if PLAY_SOUND and wav_file:
         pygame.mixer.music.stop()
     update_display()
 
-# =========================
-# LOAD MIDI
-# =========================
 def load_midi(path):
-    global roll,T,TOTAL_TIME,mid,wav_file,img,scroll_pos
+    global roll, full_img, T, TOTAL_TIME, mid, wav_file, img, scroll_pos
     mid = mido.MidiFile(path)
-    notes=[]
-    ongoing={}
-    current_time=0.0
+    notes = []
+    ongoing = {}
+    current_time = 0.0
     for msg in mid:
         current_time += msg.time
-        if msg.type=="note_on" and msg.velocity>0:
-            ongoing[msg.note]=current_time
-        elif msg.type in ("note_off",) or (msg.type=="note_on" and msg.velocity==0):
+        if msg.type == "note_on" and getattr(msg, 'velocity', 0) > 0:
+            ongoing[msg.note] = current_time
+        elif msg.type in ("note_off",) or (msg.type == "note_on" and getattr(msg, 'velocity', 0) == 0):
             if msg.note in ongoing:
                 notes.append((ongoing.pop(msg.note), current_time, msg.note))
     TOTAL_TIME = current_time
-    T = int(TOTAL_TIME*FPS)+1
-    roll = np.zeros((T,N_NOTES),dtype=np.float32)
-    for start,end,pitch in notes:
-        if not(NOTE_MIN<=pitch<=NOTE_MAX):
+    T = max(int(TOTAL_TIME * FPS) + 1, window_frames)
+    roll = np.zeros((T, N_NOTES), dtype=np.float32)
+    for start, end, pitch in notes:
+        if not (NOTE_MIN <= pitch <= NOTE_MAX):
             continue
-        start_frame = int(start*FPS)
-        end_frame   = int(end*FPS)
-        end_frame = max(start_frame+1,end_frame)
-        end_frame = min(end_frame,T)
-        duration = end_frame-start_frame
-        idx = pitch-NOTE_MIN
-        for i,t in enumerate(range(start_frame,end_frame)):
-            alpha = i/duration
-            roll[t,idx]=max(roll[t,idx],1.0-0.5*alpha)
+        start_frame = int(start * FPS)
+        end_frame = int(end * FPS)
+        end_frame = max(start_frame + 1, end_frame)
+        end_frame = min(end_frame, T)
+        duration = end_frame - start_frame
+        idx = pitch - NOTE_MIN
+        for i, t in enumerate(range(start_frame, end_frame)):
+            alpha = i / duration
+            roll[t, idx] = max(roll[t, idx], 1.0 - 0.5 * alpha)
+    full_img = render_full_image_from_roll(roll, col_widths)
     if PLAY_SOUND:
         wav_file = midi_to_temp_wav(mid)
-        pygame.mixer.music.load(wav_file)
+        try:
+            pygame.mixer.music.load(wav_file)
+        except Exception:
+            wav_file = None
     scroll_pos = 0.0
-    img.set_data(roll[:window_frames])
+    sp = 0
+    slice_img = full_img[sp:sp+window_frames]
+    if slice_img.shape[0] < window_frames:
+        pad_rows = window_frames - slice_img.shape[0]
+        pad = np.zeros((pad_rows, total_pixel_width, 3), dtype=np.uint8)
+        slice_img = np.vstack([slice_img, pad])
+    img.set_data(slice_img)
     build_keyboard()
     update_display()
     fig.canvas.draw_idle()
@@ -294,9 +380,6 @@ def choose_midi(event):
     if path:
         load_midi(path)
 
-# =========================
-# BUTTONS
-# =========================
 ax_play = plt.axes([0.25,0.02,0.15,0.06])
 ax_reset= plt.axes([0.45,0.02,0.15,0.06])
 ax_load = plt.axes([0.65,0.02,0.30,0.06])
@@ -314,11 +397,14 @@ btn_load.on_clicked(choose_midi)
 # =========================
 def animate(_):
     global current_play_time, scroll_pos
-    if play_flag and roll is not None:
-        current_play_time = time.time()-play_start_time
-        scroll_pos = current_play_time*FPS
+    if play_flag and full_img is not None:
+        current_play_time = time.time() - play_start_time
+        if current_play_time > TOTAL_TIME:
+            current_play_time = TOTAL_TIME
+        scroll_pos = int(current_play_time * FPS)
+        scroll_pos = max(0, min(scroll_pos, max(0, T - window_frames)))
         update_display()
     return []
 
-ani = animation.FuncAnimation(fig,animate,interval=1000/FPS,cache_frame_data=False)
+ani = animation.FuncAnimation(fig, animate, interval=1000/FPS, cache_frame_data=False)
 plt.show()
